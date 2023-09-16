@@ -3,6 +3,8 @@ import cmd
 import pandas as pd
 
 TMP_FILE_SUFFIX="_tmp.pckl"
+TIME_FORMAT='%Y-%m-%d %H:%M'
+
 
 
 class InteractiveCmd(cmd.Cmd):
@@ -16,25 +18,42 @@ class InteractiveCmd(cmd.Cmd):
         self.full_tmp_file_path = os.path.join(tmp_path, file_name)
 
         df_exercises = pd.read_csv(path)
-        df_exercises["Done"] = False
         df_exercises["Notes"] = ""
+        df_exercises["Done"] = False
+        df_exercises["Tries"] = 0
+        df_exercises["Date"] = pd.Timestamp.now().strftime(TIME_FORMAT) # of last try
 
         if os.path.exists(self.full_tmp_file_path):
             df_cached_exercises = pd.read_pickle(self.full_tmp_file_path)
             # Use cached exercies to set the ones already done
             matches = df_cached_exercises["Exercise"] == df_exercises["Exercise"]
-            df_exercises.loc[matches,"Done"] = df_cached_exercises["Done"]
             df_exercises.loc[matches,"Notes"] = df_cached_exercises["Notes"]
+            df_exercises.loc[matches,"Done"] = df_cached_exercises["Done"]
+            df_exercises.loc[matches,"Tries"] = df_cached_exercises["Tries"]
+            df_exercises.loc[matches,"Date"] = df_cached_exercises["Date"]
 
         self.exercises = df_exercises
 
     def _give_random_exercise(self):
-        if bool(self.exercises["Done"].all()):
+        undone_exercises = pd.DataFrame(self.exercises[~self.exercises["Done"]])
+        if bool(undone_exercises.empty):
             return None
-        priority_matches = self.exercises["Priority"] == "*"
-        if bool(self.exercises[priority_matches]["Done"].all()):
-            return self.exercises[~self.exercises["Done"]].sample(n=1)
-        return self.exercises[priority_matches & ~self.exercises["Done"]].sample(n=1)
+
+        redo_matches = undone_exercises["Tries"] >= 1 & \
+            (pd.Timestamp.now() - pd.to_datetime(undone_exercises["Date"], format=TIME_FORMAT) > pd.Timedelta(days=2))
+        if not bool(undone_exercises[redo_matches].empty):
+            return undone_exercises[redo_matches].sample(n=1)
+        
+        priority_matches = undone_exercises["Priority"] == "*" 
+        if not bool(undone_exercises[priority_matches].empty):
+            return undone_exercises[priority_matches].sample(n=1)
+
+        # If there are no exercises with priority, do the residual ones
+        return undone_exercises.sample(n=1)
+
+    def _update_meta_info(self):
+        self.exercises.loc[self.current_index, "Date"] = pd.Timestamp.now().strftime(TIME_FORMAT)
+        self.exercises.loc[self.current_index, "Tries"] += 1
 
     def _serialize_to_tmp(self):
         self.exercises.to_pickle(self.full_tmp_file_path)
@@ -54,20 +73,34 @@ class InteractiveCmd(cmd.Cmd):
         print("\n")
     
     def do_done(self, arg):
-        if self.current_index is not None:
+        if hasattr(self, 'current_index'):
             print(f"Setting exercise to done")
             self.exercises.loc[self.current_index, "Done"] = True
+            self._update_meta_info()
             self._serialize_to_tmp()
-        print(self._current_exercise().to_string(index=False))
+            print(self._current_exercise().to_string(index=False))
+        else:
+            print("No exercise selected")
 
-    def do_all(self, arg):
-        print(self.exercises.to_string(index=False))
+    def do_again(self, arg):
+        if hasattr(self, 'current_index'):
+            print(f"This was the {int(self._current_exercise()['Tries'].iloc[0])} try.\n")
+            self.exercises.loc[self.current_index, "Notes"] = arg
+            self._update_meta_info()
+            self._serialize_to_tmp()
+            print(self._current_exercise().to_string(index=False))
+        else:
+            print("No exercise selected")
 
     def do_note(self, arg):
-        if self.current_index is not None:
+        if hasattr(self, 'current_index'):
             print(f"Adding note to exercise")
             self.exercises.loc[self.current_index, "Notes"] = arg
             self._serialize_to_tmp()
+        else:
+            print("No exercise selected")
+
+    def do_all(self, arg):
         print(self.exercises.to_string(index=False))
 
     def do_quit(self, arg):
