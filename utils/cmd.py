@@ -103,6 +103,11 @@ class InteractiveCmd(cmd.Cmd):
     def do_all(self, arg):
         print(self.exercises.to_string(index=False))
 
+    def do_stats(self, arg):
+        progess = self.exercises["Done"].sum() / len(self.exercises)
+        progess_prio = self.exercises[self.exercises["Priority"] == "*"]["Done"].sum() / len(self.exercises[self.exercises["Priority"] == "*"])
+        print(f"Progress: {progess*100:.2f} ({progess_prio*100:.2f} Priority)")
+
     def do_quit(self, arg):
         self._serialize_to_tmp()
         return True
