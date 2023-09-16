@@ -1,10 +1,13 @@
-import pandas as pd
+import sys
 from utils.cmd import InteractiveCmd
 
-df_exercises = pd.read_csv('data/ana2.csv')
-df_exercises.head()
 
+arguments = sys.argv
+path = arguments[1]
 
 if __name__ == '__main__':
-    cmd = InteractiveCmd("data/ana2.csv", "tmp")
+    if path is None:
+        print("Please specify a path to the project")
+        sys.exit(1)
+    cmd = InteractiveCmd(path, "tmp")
     cmd.cmdloop()
