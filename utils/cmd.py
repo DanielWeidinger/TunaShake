@@ -2,9 +2,8 @@ import os
 import cmd
 import pandas as pd
 
-TMP_FILE_SUFFIX="_tmp.pckl"
-TIME_FORMAT='%Y-%m-%d %H:%M'
-
+TMP_FILE_SUFFIX = "_tmp.pckl"
+TIME_FORMAT = '%Y-%m-%d %H:%M'
 
 
 class InteractiveCmd(cmd.Cmd):
@@ -13,6 +12,7 @@ class InteractiveCmd(cmd.Cmd):
         cmd.Cmd.__init__(self)
         self._init_exercises(exercises_path, tmp_path)
         self.prompt = ">>> "
+
     def _init_exercises(self, path, tmp_path):
         file_name = f"{os.path.splitext(os.path.basename(path))[0]}{TMP_FILE_SUFFIX}"
         self.full_tmp_file_path = os.path.join(tmp_path, file_name)
@@ -21,30 +21,32 @@ class InteractiveCmd(cmd.Cmd):
         df_exercises["Notes"] = ""
         df_exercises["Done"] = False
         df_exercises["Tries"] = 0
-        df_exercises["Date"] = pd.Timestamp.now().strftime(TIME_FORMAT) # of last try
+        df_exercises["Date"] = pd.Timestamp.now().strftime(
+            TIME_FORMAT)  # of last try
 
         if os.path.exists(self.full_tmp_file_path):
             df_cached_exercises = pd.read_pickle(self.full_tmp_file_path)
             # Use cached exercies to set the ones already done
             matches = df_cached_exercises["Exercise"] == df_exercises["Exercise"]
-            df_exercises.loc[matches,"Notes"] = df_cached_exercises["Notes"]
-            df_exercises.loc[matches,"Done"] = df_cached_exercises["Done"]
-            df_exercises.loc[matches,"Tries"] = df_cached_exercises["Tries"]
-            df_exercises.loc[matches,"Date"] = df_cached_exercises["Date"]
+            df_exercises.loc[matches, "Notes"] = df_cached_exercises["Notes"]
+            df_exercises.loc[matches, "Done"] = df_cached_exercises["Done"]
+            df_exercises.loc[matches, "Tries"] = df_cached_exercises["Tries"]
+            df_exercises.loc[matches, "Date"] = df_cached_exercises["Date"]
 
         self.exercises = df_exercises
 
     def _give_random_exercise(self):
-        undone_exercises = pd.DataFrame(self.exercises[~self.exercises["Done"]])
+        undone_exercises = pd.DataFrame(
+            self.exercises[~self.exercises["Done"]])
         if bool(undone_exercises.empty):
             return None
 
-        redo_matches = undone_exercises["Tries"] >= 1 & \
-            (pd.Timestamp.now() - pd.to_datetime(undone_exercises["Date"], format=TIME_FORMAT) > pd.Timedelta(days=2))
+        redo_matches = (undone_exercises["Tries"] >= 1) & (pd.Timestamp.now(
+        ) - pd.to_datetime(undone_exercises["Date"], format=TIME_FORMAT) > pd.Timedelta(days=3))
         if not bool(undone_exercises[redo_matches].empty):
             return undone_exercises[redo_matches].sample(n=1)
-        
-        priority_matches = undone_exercises["Priority"] == "*" 
+
+        priority_matches = undone_exercises["Priority"] == "*"
         if not bool(undone_exercises[priority_matches].empty):
             return undone_exercises[priority_matches].sample(n=1)
 
@@ -52,15 +54,16 @@ class InteractiveCmd(cmd.Cmd):
         return undone_exercises.sample(n=1)
 
     def _update_meta_info(self):
-        self.exercises.loc[self.current_index, "Date"] = pd.Timestamp.now().strftime(TIME_FORMAT)
+        self.exercises.loc[self.current_index,
+                           "Date"] = pd.Timestamp.now().strftime(TIME_FORMAT)
         self.exercises.loc[self.current_index, "Tries"] += 1
 
     def _serialize_to_tmp(self):
         self.exercises.to_pickle(self.full_tmp_file_path)
+
     def _current_exercise(self):
         return self.exercises.loc[[self.current_index]]
 
-    
     def do_next(self, arg):
         rnd_exercise = self._give_random_exercise()
         if rnd_exercise is None:
@@ -71,7 +74,7 @@ class InteractiveCmd(cmd.Cmd):
         print(f"Next exercise\n")
         print(self._current_exercise().to_string(index=False))
         print("\n")
-    
+
     def do_done(self, arg):
         if hasattr(self, 'current_index'):
             print(f"Setting exercise to done")
@@ -84,7 +87,8 @@ class InteractiveCmd(cmd.Cmd):
 
     def do_again(self, arg):
         if hasattr(self, 'current_index'):
-            print(f"This was the {int(self._current_exercise()['Tries'].iloc[0])} try.\n")
+            print(
+                f"This was the {int(self._current_exercise()['Tries'].iloc[0])} try.\n")
             self.exercises.loc[self.current_index, "Notes"] = arg
             self._update_meta_info()
             self._serialize_to_tmp()
@@ -105,7 +109,8 @@ class InteractiveCmd(cmd.Cmd):
 
     def do_stats(self, arg):
         progess = self.exercises["Done"].sum() / len(self.exercises)
-        progess_prio = self.exercises[self.exercises["Priority"] == "*"]["Done"].sum() / len(self.exercises[self.exercises["Priority"] == "*"])
+        progess_prio = self.exercises[self.exercises["Priority"] == "*"]["Done"].sum(
+        ) / len(self.exercises[self.exercises["Priority"] == "*"])
         print(f"Progress: {progess*100:.2f} ({progess_prio*100:.2f} Priority)")
 
     def do_quit(self, arg):
