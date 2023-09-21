@@ -2,18 +2,23 @@ import os
 import cmd
 import pandas as pd
 
-TMP_FILE_SUFFIX = "_tmp.pckl"
-TIME_FORMAT = '%Y-%m-%d %H:%M'
+
+from utils import TIME_FORMAT, TMP_FILE_SUFFIX
+from utils.exercise_selection import give_random_exercise
 
 
 class InteractiveCmd(cmd.Cmd):
 
     def __init__(self, exercises_path, tmp_path):
         cmd.Cmd.__init__(self)
+        self.exercise_path = exercises_path
+        self.tmp_path = tmp_path
         self._init_exercises(exercises_path, tmp_path)
         self.prompt = ">>> "
 
     def _init_exercises(self, path, tmp_path):
+        self.only_new = False
+
         file_name = f"{os.path.splitext(os.path.basename(path))[0]}{TMP_FILE_SUFFIX}"
         self.full_tmp_file_path = os.path.join(tmp_path, file_name)
 
@@ -35,24 +40,6 @@ class InteractiveCmd(cmd.Cmd):
 
         self.exercises = df_exercises
 
-    def _give_random_exercise(self):
-        undone_exercises = pd.DataFrame(
-            self.exercises[~self.exercises["Done"]])
-        if bool(undone_exercises.empty):
-            return None
-
-        redo_matches = (undone_exercises["Tries"] >= 1) & (pd.Timestamp.now(
-        ) - pd.to_datetime(undone_exercises["Date"], format=TIME_FORMAT) > pd.Timedelta(days=3))
-        if not bool(undone_exercises[redo_matches].empty):
-            return undone_exercises[redo_matches].sample(n=1)
-
-        priority_matches = undone_exercises["Priority"] == "*"
-        if not bool(undone_exercises[priority_matches].empty):
-            return undone_exercises[priority_matches].sample(n=1)
-
-        # If there are no exercises with priority, do the residual ones
-        return undone_exercises.sample(n=1)
-
     def _update_meta_info(self):
         self.exercises.loc[self.current_index,
                            "Date"] = pd.Timestamp.now().strftime(TIME_FORMAT)
@@ -65,7 +52,7 @@ class InteractiveCmd(cmd.Cmd):
         return self.exercises.loc[[self.current_index]]
 
     def do_next(self, arg):
-        rnd_exercise = self._give_random_exercise()
+        rnd_exercise = give_random_exercise(self.exercises, self.only_new)
         if rnd_exercise is None:
             print("All exercises done")
             return
@@ -104,6 +91,18 @@ class InteractiveCmd(cmd.Cmd):
         else:
             print("No exercise selected")
 
+    def do_only(self, arg):
+        if arg == "":
+            print("No argument given")
+            return
+        if arg == "new":
+            self.only_new = True
+
+    def do_reset(self, arg):
+        print("Resetting ")
+        del self.only_new
+        self._init_exercises(self.exercise_path, self.tmp_path)
+
     def do_all(self, arg):
         print(self.exercises.to_string(index=False))
 
@@ -112,6 +111,17 @@ class InteractiveCmd(cmd.Cmd):
         progess_prio = self.exercises[self.exercises["Priority"] == "*"]["Done"].sum(
         ) / len(self.exercises[self.exercises["Priority"] == "*"])
         print(f"Progress: {progess*100:.2f} ({progess_prio*100:.2f} Priority)")
+
+    def do_help(self, arg):
+        print("""
+        next: Get a random exercise
+        done: Mark exercise as done
+        again: Mark exercise as done and add a note
+        note: Add a note to the exercise
+        all: Show all exercises
+        stats: Show statistics
+        quit: Quit the program
+        """)
 
     def do_quit(self, arg):
         self._serialize_to_tmp()
