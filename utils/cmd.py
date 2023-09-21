@@ -120,6 +120,8 @@ class InteractiveCmd(cmd.Cmd):
         note: Add a note to the exercise
         all: Show all exercises
         stats: Show statistics
+        only <arg>: 
+              * new: Only show new exercises
         quit: Quit the program
         """)
 
