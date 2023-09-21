@@ -108,9 +108,17 @@ class InteractiveCmd(cmd.Cmd):
 
     def do_stats(self, arg):
         progess = self.exercises["Done"].sum() / len(self.exercises)
-        progess_prio = self.exercises[self.exercises["Priority"] == "*"]["Done"].sum(
-        ) / len(self.exercises[self.exercises["Priority"] == "*"])
-        print(f"Progress: {progess*100:.2f} ({progess_prio*100:.2f} Priority)")
+        if len(self.exercises[self.exercises["Priority"] == "*"]) == 0:
+            progess_prio = 0
+        else:
+            progess_prio = self.exercises[self.exercises["Priority"] == "*"]["Done"].sum(
+            ) / len(self.exercises[self.exercises["Priority"] == "*"])
+        tried = len(self.exercises[self.exercises["Tries"]
+                                   != 0]) / len(self.exercises)
+        print(f"""
+        Progress: {progess*100:.2f}% ({progess_prio*100:.2f}% Priority)
+        Tried: {tried*100:.2f}%
+              """)
 
     def do_help(self, arg):
         print("""
