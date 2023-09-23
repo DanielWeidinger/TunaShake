@@ -23,6 +23,7 @@ class InteractiveCmd(cmd.Cmd):
         self.full_tmp_file_path = os.path.join(tmp_path, file_name)
 
         df_exercises = pd.read_csv(path)
+        df_exercises["Exercise"] = df_exercises["Exercise"].astype(str)
         df_exercises["Notes"] = ""
         df_exercises["Done"] = False
         df_exercises["Tries"] = 0
@@ -98,6 +99,25 @@ class InteractiveCmd(cmd.Cmd):
         if arg == "new":
             self.only_new = True
 
+    def do_select(self, arg):
+        if arg == "":
+            print("No argument given")
+            return
+        matches = self.exercises["Exercise"].str.contains(
+            arg, case=False)
+
+        if matches.sum() == 0:
+            print("No matching exercise found")
+        elif matches.sum() == 1:
+            self.current_index = self.exercises[matches].index[0]
+            print(f"Selected exercise\n")
+            print(self._current_exercise().to_string(index=False))
+            print("\n")
+        else:
+            print("Multiple matching exercises found")
+            print(pd.DataFrame(
+                self.exercises[["Exercise"]][matches]).to_string(index=False))
+
     def do_reset(self, arg):
         print("Resetting ")
         del self.only_new
@@ -128,8 +148,9 @@ class InteractiveCmd(cmd.Cmd):
         note: Add a note to the exercise
         all: Show all exercises
         stats: Show statistics
-        only <arg>: 
+        only <arg>:
               * new: Only show new exercises
+        select <arg>: Select an exercise by name
         quit: Quit the program
         """)
 
