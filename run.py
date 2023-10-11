@@ -1,4 +1,5 @@
 import sys
+from utils import DEFAULT_TMP_PATH
 from utils.cmd import InteractiveCmd
 
 
@@ -9,5 +10,5 @@ if __name__ == '__main__':
     if path is None:
         print("Please specify the path the exercises csv file")
         sys.exit(1)
-    cmd = InteractiveCmd(path, "tmp")
+    cmd = InteractiveCmd(path, DEFAULT_TMP_PATH)
     cmd.cmdloop()

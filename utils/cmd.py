@@ -23,7 +23,13 @@ class InteractiveCmd(cmd.Cmd):
         self.full_tmp_file_path = os.path.join(tmp_path, file_name)
 
         df_exercises = pd.read_csv(path)
-        df_exercises["Exercise"] = df_exercises["Exercise"].astype(str)
+        if "float" in str(df_exercises["Exercise"].dtype):
+            df_exercises["Exercise"] = df_exercises["Exercise"].astype(str).str.rstrip(
+                ".0")
+        else:
+            df_exercises["Exercise"] = df_exercises["Exercise"].astype(str)
+        df_exercises["Link"] = df_exercises["Link"].astype(
+            str) if "Link" in df_exercises.columns else "nan"
         df_exercises["Notes"] = ""
         df_exercises["Done"] = False
         df_exercises["Tries"] = 0
@@ -32,19 +38,36 @@ class InteractiveCmd(cmd.Cmd):
 
         if os.path.exists(self.full_tmp_file_path):
             df_cached_exercises = pd.read_pickle(self.full_tmp_file_path)
+
             # Use cached exercies to set the ones already done
-            matches = df_cached_exercises["Exercise"] == df_exercises["Exercise"]
-            df_exercises.loc[matches, "Notes"] = df_cached_exercises["Notes"]
-            df_exercises.loc[matches, "Done"] = df_cached_exercises["Done"]
-            df_exercises.loc[matches, "Tries"] = df_cached_exercises["Tries"]
-            df_exercises.loc[matches, "Date"] = df_cached_exercises["Date"]
+            for _, row in df_cached_exercises.iterrows():
+                matches = df_exercises["Exercise"] == row["Exercise"]
+                if matches.sum() > 1:
+                    raise Exception(
+                        "Multiple Matches for single Exercise in cache found")
+                if matches.sum() == 1:
+                    # print("Setting: " + str(row))
+                    df_exercises.loc[matches, "Notes"] = row["Notes"]
+                    df_exercises.loc[matches, "Done"] = row["Done"]
+                    df_exercises.loc[matches, "Tries"] = row["Tries"]
+                    df_exercises.loc[matches, "Date"] = row["Date"]
+
+            # print(df_cached_exercises["Exercise"])
+            # matches = df_exercises["Exercise"].apply(
+            #     lambda x: x in list(df_cached_exercises["Exercise"]))
+            # print(matches)
+            # df_exercises.loc[matches, "Notes"] = df_cached_exercises["Notes"]
+            # df_exercises.loc[matches, "Done"] = df_cached_exercises["Done"]
+            # df_exercises.loc[matches, "Tries"] = df_cached_exercises["Tries"]
+            # df_exercises.loc[matches, "Date"] = df_cached_exercises["Date"]
 
         self.exercises = df_exercises
 
-    def _update_meta_info(self):
+    def _update_meta_info(self, no_update=False):
         self.exercises.loc[self.current_index,
                            "Date"] = pd.Timestamp.now().strftime(TIME_FORMAT)
-        self.exercises.loc[self.current_index, "Tries"] += 1
+        self.exercises.loc[self.current_index,
+                           "Tries"] += 1 if not no_update else 0
 
     def _serialize_to_tmp(self):
         self.exercises.to_pickle(self.full_tmp_file_path)
@@ -72,6 +95,16 @@ class InteractiveCmd(cmd.Cmd):
             print(self._current_exercise().to_string(index=False))
         else:
             print("No exercise selected")
+
+    def do_undone(self, arg):
+        if hasattr(self, 'current_index') and self._current_exercise()["Done"].iloc[0]:
+            print(f"Setting exercise to not done")
+            self.exercises.loc[self.current_index, "Done"] = False
+            self._update_meta_info(no_update=True)
+            self._serialize_to_tmp()
+            print(self._current_exercise().to_string(index=False))
+        else:
+            print("No exercise selected or exercise not done")
 
     def do_again(self, arg):
         if hasattr(self, 'current_index'):
@@ -139,6 +172,20 @@ class InteractiveCmd(cmd.Cmd):
         Progress: {progess*100:.2f}% ({progess_prio*100:.2f}% Priority)
         Tried: {tried*100:.2f}%
               """)
+
+    def do_open(self, arg):
+        if hasattr(self, 'current_index'):
+            link = self._current_exercise()["Link"].iloc[0]
+            if link != "nan":
+                if ";" in link:
+                    links = link.split(";")
+                    for link in links:
+                        os.system(f"xdg-open {link}")
+                os.system(f"xdg-open {link}")
+            else:
+                print("No link available")
+        else:
+            print("No exercise selected")
 
     def do_help(self, arg):
         print("""
