@@ -3,7 +3,7 @@ import cmd
 import pandas as pd
 
 
-from utils import TIME_FORMAT, TMP_FILE_SUFFIX
+from utils import TIME_FORMAT, TMP_FILE_SUFFIX, DEFAULT_MODE
 from utils.exercise_selection import give_random_exercise
 
 
@@ -13,11 +13,12 @@ class InteractiveCmd(cmd.Cmd):
         cmd.Cmd.__init__(self)
         self.exercise_path = exercises_path
         self.tmp_path = tmp_path
+        self.hidden_mode = DEFAULT_MODE == "hidden"
         self._init_exercises(exercises_path, tmp_path)
         self.prompt = ">>> "
 
     def _init_exercises(self, path, tmp_path):
-        self.only_new = False
+        self.display_state = ""
 
         file_name = f"{os.path.splitext(os.path.basename(path))[0]}{TMP_FILE_SUFFIX}"
         self.full_tmp_file_path = os.path.join(tmp_path, file_name)
@@ -76,14 +77,15 @@ class InteractiveCmd(cmd.Cmd):
         return self.exercises.loc[[self.current_index]]
 
     def do_next(self, arg):
-        rnd_exercise = give_random_exercise(self.exercises, self.only_new)
+        rnd_exercise = give_random_exercise(self.exercises, self.display_state)
         if rnd_exercise is None:
             print("All exercises done")
             return
 
         self.current_index = rnd_exercise.index[0]
         print(f"Next exercise\n")
-        print(self._current_exercise().to_string(index=False))
+        if not self.hidden_mode:
+            print(self._current_exercise().to_string(index=False))
         print("\n")
 
     def do_done(self, arg):
@@ -130,7 +132,9 @@ class InteractiveCmd(cmd.Cmd):
             print("No argument given")
             return
         if arg == "new":
-            self.only_new = True
+            self.display_state = "new"
+        if arg == "repeat":
+            self.display_state = "repeat"
 
     def do_select(self, arg):
         if arg == "":
@@ -171,17 +175,23 @@ class InteractiveCmd(cmd.Cmd):
         print(f"""
         Progress: {progess*100:.2f}% ({progess_prio*100:.2f}% Priority)
         Tried: {tried*100:.2f}%
+        Total: {len(self.exercises[self.exercises["Done"]])}/{len(self.exercises)}
               """)
 
     def do_open(self, arg):
         if hasattr(self, 'current_index'):
-            link = self._current_exercise()["Link"].iloc[0]
+            if arg == "solution":
+                key = "Solution"
+                if (self.hidden_mode):
+                    print(
+                        f"You just did exercies {self._current_exercise().to_string(index=False)}")
+            else:
+                key = "Link"
+            link = self._current_exercise()[key].iloc[0]
             if link != "nan":
-                if ";" in link:
-                    links = link.split(";")
-                    for link in links:
-                        os.system(f"xdg-open {link}")
-                os.system(f"xdg-open {link}")
+                links = link.split(";") if ";" in link else [link]
+                for link in links:
+                    os.system(f"xdg-open {link}")
             else:
                 print("No link available")
         else:
@@ -198,9 +208,12 @@ class InteractiveCmd(cmd.Cmd):
         only <arg>:
               * new: Only show new exercises
         select <arg>: Select an exercise by name
-        quit: Quit the program
+        quit or exit: Quit the program
         """)
 
     def do_quit(self, arg):
         self._serialize_to_tmp()
         return True
+
+    def do_exit(self, arg):
+        return self.do_quit(arg)

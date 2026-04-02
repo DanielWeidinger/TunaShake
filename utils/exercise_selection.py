@@ -3,16 +3,20 @@ import pandas as pd
 from utils import DAYS_TILL_REPEAT, TIME_FORMAT
 
 
-def give_random_exercise(exercises, only_new):
+def give_random_exercise(exercises, display_state):
     undone_exercises = pd.DataFrame(
         exercises[~exercises["Done"]])
     if bool(undone_exercises.empty):
         return None
 
     extra_conditions = undone_exercises["Done"] == False
-    if only_new:
+    if display_state == "new":
         print("!Only new Mode!")
         extra_conditions = (undone_exercises["Tries"] == 0)
+
+    if display_state == "repeat":
+        print("!repeat mode!")
+        return undone_exercises[undone_exercises["Tries"] >= 1].sample(n=1)
 
     redo_matches = (undone_exercises["Tries"] >= 1) & (pd.Timestamp.now(
     ) - pd.to_datetime(undone_exercises["Date"], format=TIME_FORMAT) > pd.Timedelta(days=DAYS_TILL_REPEAT)) & extra_conditions
