@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS exercises (
     solution_path TEXT,
     source_path   TEXT,
     priority      INTEGER NOT NULL DEFAULT 0,
+    tag           TEXT,
     UNIQUE(course_id, title)
 );
 
@@ -51,6 +52,7 @@ def get_connection() -> sqlite3.Connection:
     for migration in [
         "ALTER TABLE exercises ADD COLUMN source_path TEXT",
         "ALTER TABLE exercises ADD COLUMN priority INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE exercises ADD COLUMN tag TEXT",
     ]:
         try:
             conn.execute(migration)

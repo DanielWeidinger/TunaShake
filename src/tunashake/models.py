@@ -16,6 +16,7 @@ class Exercise:
     solution_path: str | None = None
     source_path: str | None = None
     priority: int = 0
+    tag: str | None = None
 
 
 @dataclass

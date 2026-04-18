@@ -1,19 +1,27 @@
 """
 Parse exercise titles from PDF exercise sheets.
 
-Supports two common layouts:
+Supports three layouts (tried in order):
 
-  QFT-style
-    Exercise 1 - Some Title
-    1.1 Do this thing ...
-    1.2 Do another thing ...
+  QFT-style  (Sheets 3, 4, …)
+    Exercise 1 - Title
+    1.1 Sub-exercise text
+    1.2 …
 
-  S/H-style (short/homework sections)
-    S 1  Probability Distribution Functions
-    (a) How are ...
-    (b) Does a ...
-    H 1  Some Homework
-    (a) ...
+  Generic-style  (Sheets 2, 6, sheet1, …)
+    Exercise N - Title   OR   Problem N - Title
+    Sub-exercises in any of:
+      "1. Text"   ordinal numbers
+      "[a] Text"  bracket letters
+      "(a) Text"  paren letters
+      "a) Text"   bare letter-paren
+    Exercises/Problems with no sub-items are emitted as sheet.N.
+
+  S/H-style  (Exercise_sheet_1, …)
+    S 1  Short question title
+    (a) …
+    H 1  Homework title
+    (a) …
 """
 
 import re
@@ -33,13 +41,22 @@ _SHEET_PATTERNS = [
     re.compile(r'[Bb]latt\s+0*(\d+)', re.IGNORECASE),
 ]
 
-# QFT-style: "Exercise 1", "Exercise 1 - Title", "Exercise 1: Title"
-_EXERCISE_HEADER = re.compile(r'^Exercise\s+(\d+)\s*[-:–]?\s*', re.IGNORECASE)
-# QFT-style sub-exercise: "1.1 ...", "1.12 ..."
+# QFT-style: inline "N.M" sub-exercise numbers (no header context needed)
 _SUB_NUMERIC = re.compile(r'^(\d+)\.(\d+)\s')
-# S/H-style header: "S 1 Title", "H 2 Title"
+
+# Generic-style: "Exercise N" or "Problem N" section headers
+_GENERIC_HEADER = re.compile(r'^(?:Exercise|Problem)\s+(\d+)\b', re.IGNORECASE)
+
+# Generic-style sub-exercise patterns (tried in order; first match wins)
+_GENERIC_SUBS: list[re.Pattern[str]] = [
+    re.compile(r'^(\d+)\.\s'),       # "1. Text"
+    re.compile(r'^\[([a-z])\]\s'),   # "[a] Text"
+    re.compile(r'^\(([a-z])\)\s'),   # "(a) Text"
+    re.compile(r'^([a-z])\)\s'),     # "a) Text"
+]
+
+# S/H-style headers and sub-exercises
 _SH_HEADER = re.compile(r'^([SH])\s+(\d+)\b')
-# S/H-style sub-exercise: "(a) ...", "(b) ..."
 _SUB_LETTER = re.compile(r'^\(([a-z])\)\s')
 
 
@@ -61,15 +78,17 @@ def detect_sheet_number(pdf_path: str) -> int | None:
 def parse_exercises(pdf_path: str, sheet: int) -> list[str]:
     """
     Return a deduplicated, ordered list of exercise titles in
-    ``sheet.exercise.sub`` format parsed from *pdf_path*.
+    ``sheet.exercise[.sub]`` format parsed from *pdf_path*.
 
-    Tries the QFT-style layout first; falls back to S/H-style if nothing
-    is found.
+    Tries QFT-style first, then generic-style (Exercise/Problem headers),
+    then S/H-style as a final fallback.
     """
     text = _extract_text(pdf_path)
     lines = text.splitlines()
 
     titles = _parse_qft_style(lines, sheet)
+    if not titles:
+        titles = _parse_generic_style(lines, sheet)
     if not titles:
         titles = _parse_sh_style(lines, sheet)
 
@@ -84,7 +103,11 @@ def parse_exercises(pdf_path: str, sheet: int) -> list[str]:
 
 
 def _parse_qft_style(lines: list[str], sheet: int) -> list[str]:
-    """Handle 'Exercise N' headers with 'N.M' sub-exercises."""
+    """Collect 'N.M …' inline sub-exercise numbers (no header context needed).
+
+    Used by QFT sheets where sub-exercises are already namespaced as e.g.
+    '1.1', '3.2', so the exercise number is embedded in the sub-exercise line.
+    """
     titles: list[str] = []
     for line in lines:
         line = line.strip()
@@ -96,10 +119,70 @@ def _parse_qft_style(lines: list[str], sheet: int) -> list[str]:
     return titles
 
 
-def _parse_sh_style(lines: list[str], sheet: int) -> list[str]:
-    """Handle 'S N' / 'H N' headers with '(a)' '(b)' sub-exercises."""
+def _parse_generic_style(lines: list[str], sheet: int) -> list[str]:
+    """Collect sub-exercises under 'Exercise N' or 'Problem N' headers.
+
+    Recognises four sub-exercise syntaxes within each block:
+      - ordinal  "1. …"
+      - bracket  "[a] …"
+      - paren    "(a) …"
+      - bare     "a) …"
+
+    The first syntax seen in a block locks in the pattern for that block.
+    This prevents nested sub-sub-exercises (e.g. (a)/(b) inside sub-item 6)
+    from being picked up as additional top-level sub-exercises.
+
+    Exercises/Problems with no detected sub-items are emitted as ``sheet.N``.
+    Returns an empty list if no Exercise/Problem header is found, so this
+    parser silently passes through on sheets that use other layouts.
+    """
     titles: list[str] = []
-    seq = 0               # sequential exercise counter across S and H groups
+    current: int | None = None
+    subs: list[str] = []
+    locked_pat: int | None = None   # index into _GENERIC_SUBS; set on first hit
+    found_any_header = False
+
+    def _emit() -> None:
+        if current is None:
+            return
+        if subs:
+            for s in subs:
+                titles.append(f"{sheet}.{current}.{s}")
+        else:
+            titles.append(f"{sheet}.{current}")
+
+    for line in lines:
+        line = line.strip()
+
+        m = _GENERIC_HEADER.match(line)
+        if m:
+            _emit()
+            current = int(m.group(1))
+            subs = []
+            locked_pat = None
+            found_any_header = True
+            continue
+
+        if current is not None:
+            for i, pat in enumerate(_GENERIC_SUBS):
+                m = pat.match(line)
+                if m:
+                    if locked_pat is None:
+                        locked_pat = i          # lock in on first hit
+                    if i == locked_pat:
+                        sub = str(m.group(1))
+                        if sub not in subs:
+                            subs.append(sub)
+                    break                       # always stop at first match
+
+    _emit()
+    return titles if found_any_header else []
+
+
+def _parse_sh_style(lines: list[str], sheet: int) -> list[str]:
+    """Collect sub-exercises under 'S N' / 'H N' headers with '(a)' markers."""
+    titles: list[str] = []
+    seq = 0
     current: int | None = None
 
     for line in lines:

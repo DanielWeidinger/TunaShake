@@ -19,6 +19,7 @@ def _row_to_exercise(row: sqlite3.Row) -> Exercise:
         solution_path=row["solution_path"],
         source_path=row["source_path"],
         priority=row["priority"],
+        tag=row["tag"],
     )
 
 
@@ -61,32 +62,44 @@ def create_exercise(
     solution_path: Optional[str] = None,
     source_path: Optional[str] = None,
     priority: int = 0,
+    tag: Optional[str] = None,
 ) -> Exercise:
     cur = conn.execute(
-        "INSERT INTO exercises (course_id, title, solution_path, source_path, priority) VALUES (?, ?, ?, ?, ?)",
-        (course_id, title, solution_path, source_path, priority),
+        "INSERT INTO exercises (course_id, title, solution_path, source_path, priority, tag) VALUES (?, ?, ?, ?, ?, ?)",
+        (course_id, title, solution_path, source_path, priority, tag),
     )
     conn.commit()
-    return Exercise(id=cur.lastrowid, course_id=course_id, title=title, solution_path=solution_path, source_path=source_path, priority=priority)
+    return Exercise(id=cur.lastrowid, course_id=course_id, title=title, solution_path=solution_path, source_path=source_path, priority=priority, tag=tag)
 
 
 def get_exercise(
     conn: sqlite3.Connection, course_id: int, title: str
 ) -> Optional[Exercise]:
     row = conn.execute(
-        "SELECT id, course_id, title, solution_path, source_path, priority FROM exercises "
+        "SELECT id, course_id, title, solution_path, source_path, priority, tag FROM exercises "
         "WHERE course_id = ? AND title = ?",
         (course_id, title),
     ).fetchone()
     return _row_to_exercise(row) if row else None
 
 
-def list_exercises(conn: sqlite3.Connection, course_id: int) -> list[Exercise]:
-    rows = conn.execute(
-        "SELECT id, course_id, title, solution_path, source_path, priority FROM exercises "
-        "WHERE course_id = ? ORDER BY title",
-        (course_id,),
-    ).fetchall()
+def list_exercises(
+    conn: sqlite3.Connection,
+    course_id: int,
+    tag: Optional[str] = None,
+) -> list[Exercise]:
+    if tag is not None:
+        rows = conn.execute(
+            "SELECT id, course_id, title, solution_path, source_path, priority, tag FROM exercises "
+            "WHERE course_id = ? AND tag = ? ORDER BY title",
+            (course_id, tag),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, course_id, title, solution_path, source_path, priority, tag FROM exercises "
+            "WHERE course_id = ? ORDER BY title",
+            (course_id,),
+        ).fetchall()
     return [_row_to_exercise(r) for r in rows]
 
 
@@ -116,6 +129,16 @@ def set_exercise_solution(
     conn.execute(
         "UPDATE exercises SET solution_path = ? WHERE id = ?",
         (solution_path, exercise_id),
+    )
+    conn.commit()
+
+
+def set_exercise_tag(
+    conn: sqlite3.Connection, exercise_id: int, tag: Optional[str]
+) -> None:
+    conn.execute(
+        "UPDATE exercises SET tag = ? WHERE id = ?",
+        (tag, exercise_id),
     )
     conn.commit()
 

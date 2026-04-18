@@ -11,7 +11,7 @@ Command hierarchy:
 
 import subprocess
 import sys
-from typing import Optional
+from typing import Annotated, Optional
 
 import typer
 from rich.console import Console
@@ -31,6 +31,7 @@ from tunashake.repository import (
     set_exercise_priority,
     set_exercise_solution,
     set_exercise_source,
+    set_exercise_tag,
 )
 from tunashake.services import STRATEGIES, course_stats, next_exercise
 from tunashake.validation import validate_course_name, validate_grade, validate_title
@@ -53,6 +54,38 @@ app.add_typer(exercise_app, name="exercise")
 app.add_typer(trial_app, name="trial")
 app.add_typer(stats_app, name="stats")
 app.add_typer(db_app, name="db")
+
+
+# ── shell completion ───────────────────────────────────────────────────────────
+
+def _complete_courses(incomplete: str) -> list[str]:
+    """Return course names from the DB that start with *incomplete*."""
+    try:
+        conn = get_connection()
+        courses = list_courses(conn)
+        conn.close()
+        return [c.name for c in courses if c.name.lower().startswith(incomplete.lower())]
+    except Exception:
+        return []
+
+
+def _complete_tags(incomplete: str) -> list[str]:
+    """Return distinct tag values from the DB that start with *incomplete*."""
+    try:
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT DISTINCT tag FROM exercises WHERE tag IS NOT NULL ORDER BY tag"
+        ).fetchall()
+        conn.close()
+        return [r["tag"] for r in rows if r["tag"].lower().startswith(incomplete.lower())]
+    except Exception:
+        return []
+
+
+_CourseOpt = Annotated[
+    str,
+    typer.Option("--course", "-c", help="Course name", autocompletion=_complete_courses),
+]
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -127,11 +160,12 @@ def course_list():
 
 @exercise_app.command("add")
 def exercise_add(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     title: str = typer.Option(..., "--title", "-t", help="Title (Sheet.Number.Subexercise)"),
     solution_path: Optional[str] = typer.Option(None, "--solution-path", "-s", help="Path or URL to solution"),
     source_path: Optional[str] = typer.Option(None, "--source-path", "-p", help="Path or URL to exercise source"),
     priority: int = typer.Option(0, "--priority", help="A-priori priority (higher = picked sooner)"),
+    tag: Optional[str] = typer.Option(None, "--tag", help="Source tag (e.g. 'schwartz', 'griffiths')", autocompletion=_complete_tags),
 ):
     """Add an exercise to a course."""
     try:
@@ -141,7 +175,7 @@ def exercise_add(
 
     conn, c = _require_course(course)
     try:
-        ex = create_exercise(conn, c.id, title, solution_path, source_path, priority)
+        ex = create_exercise(conn, c.id, title, solution_path, source_path, priority, tag)
         console.print(f"[green]Added exercise:[/green] {ex.title} (id={ex.id})")
     except Exception as e:
         if "UNIQUE" in str(e):
@@ -153,31 +187,34 @@ def exercise_add(
 
 @exercise_app.command("list")
 def exercise_list(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
+    tag: Optional[str] = typer.Option(None, "--tag", help="Filter by tag (omit for all)", autocompletion=_complete_tags),
 ):
     """List all exercises in a course."""
     conn, c = _require_course(course)
-    exercises = list_exercises(conn, c.id)
+    exercises = list_exercises(conn, c.id, tag=tag)
     trials_map = get_trials_for_course(conn, c.id)
     conn.close()
 
     if not exercises:
-        console.print(f"No exercises in '{course}' yet.")
+        msg = f"No exercises in '{course}'"
+        msg += f" with tag '{tag}'" if tag else ""
+        console.print(msg + ".")
         return
 
-    table = Table("Title", "Pri", "Trials", "Latest Grade", "Source", "Solution", show_header=True)
+    table = Table("Title", "Tag", "Pri", "Trials", "Latest Grade", "Source", "Solution", show_header=True)
     for ex in exercises:
         trials = trials_map.get(ex.id, [])
         latest = trials[-1].grade if trials else "-"
         src = ex.source_path or "-"
         sol = ex.solution_path or "-"
-        table.add_row(ex.title, str(ex.priority), str(len(trials)), str(latest), src, sol)
+        table.add_row(ex.title, ex.tag or "-", str(ex.priority), str(len(trials)), str(latest), src, sol)
     console.print(table)
 
 
 @exercise_app.command("show")
 def exercise_show(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     title: str = typer.Option(..., "--title", "-t", help="Exercise title"),
 ):
     """Inspect an exercise and its trial history."""
@@ -193,6 +230,8 @@ def exercise_show(
     console.print(f"\n[bold]Exercise:[/bold] {ex.title}")
     console.print(f"[bold]Course:[/bold]   {course}")
     console.print(f"[bold]Priority:[/bold] {ex.priority}")
+    if ex.tag:
+        console.print(f"[bold]Tag:[/bold]      {ex.tag}")
     if ex.source_path:
         console.print(f"[bold]Source:[/bold]   {ex.source_path}")
     else:
@@ -219,10 +258,14 @@ _STRATEGY_NAMES = ", ".join(STRATEGIES)
 
 @exercise_app.command("next")
 def exercise_next(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     strategy: str = typer.Option(
         "priority", "--strategy", "-s",
         help=f"Picking strategy: {_STRATEGY_NAMES}",
+    ),
+    tag: Optional[str] = typer.Option(
+        None, "--tag", help="Restrict to exercises with this tag (omit for all)",
+        autocompletion=_complete_tags,
     ),
 ):
     """Recommend the next exercise to practice."""
@@ -230,12 +273,14 @@ def exercise_next(
         _abort(f"Unknown strategy '{strategy}'. Choose from: {_STRATEGY_NAMES}")
 
     conn, c = _require_course(course)
-    exercises = list_exercises(conn, c.id)
+    exercises = list_exercises(conn, c.id, tag=tag)
     trials_map = get_trials_for_course(conn, c.id)
     conn.close()
 
     if not exercises:
-        console.print(f"No exercises in '{course}' yet.")
+        msg = f"No exercises in '{course}'"
+        msg += f" with tag '{tag}'" if tag else ""
+        console.print(msg + ".")
         return
 
     ex = STRATEGIES[strategy](exercises, trials_map)
@@ -254,7 +299,7 @@ def exercise_next(
 
 @exercise_app.command("open-solution")
 def exercise_open_solution(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     title: str = typer.Option(..., "--title", "-t", help="Exercise title"),
 ):
     """Open the solution for an exercise using xdg-open."""
@@ -272,7 +317,7 @@ def exercise_open_solution(
 
 @exercise_app.command("open-source")
 def exercise_open_source(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     title: str = typer.Option(..., "--title", "-t", help="Exercise title"),
 ):
     """Open the source for an exercise using xdg-open."""
@@ -290,7 +335,7 @@ def exercise_open_source(
 
 @exercise_app.command("set-priority")
 def exercise_set_priority(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     title: str = typer.Option(None, "--title", "-t", help="Exercise title (omit to set for all exercises in the course)"),
     priority: int = typer.Option(..., "--priority", "-p", help="New priority value (higher = picked sooner)"),
     like: str = typer.Option(None, "--like", "-l", help="Title pattern (SQL LIKE, e.g. '1.5.%%')"),
@@ -326,10 +371,56 @@ def exercise_set_priority(
         console.print(f"[green]Priority set to {priority}[/green] for all {len(exercises)} exercise(s) in '{course}'")
 
 
+@exercise_app.command("set-tag")
+def exercise_set_tag(
+    course: _CourseOpt = ...,
+    tag: Optional[str] = typer.Option(..., "--tag", help="Tag to assign (empty string to clear)", autocompletion=_complete_tags),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="Exercise title (omit to tag all exercises)"),
+    like: Optional[str] = typer.Option(None, "--like", "-l", help="Title pattern (SQL LIKE, e.g. '1.5.%%')"),
+):
+    """Set (or clear) the tag on one or more exercises.
+
+    Pass --tag "" to remove the tag.
+    """
+    resolved_tag = tag if tag else None
+
+    conn, c = _require_course(course)
+
+    if title:
+        ex = get_exercise(conn, c.id, title)
+        if not ex:
+            conn.close()
+            _abort(f"Exercise '{title}' not found in course '{course}'.")
+        set_exercise_tag(conn, ex.id, resolved_tag)
+        conn.close()
+        label = f"'{resolved_tag}'" if resolved_tag else "(cleared)"
+        console.print(f"[green]Tag set to {label}[/green] for {title}")
+    elif like:
+        rows = conn.execute(
+            "SELECT id, title FROM exercises WHERE course_id = ? AND title LIKE ?",
+            (c.id, like),
+        ).fetchall()
+        if not rows:
+            conn.close()
+            _abort(f"No exercises matching '{like}' in course '{course}'.")
+        for row in rows:
+            set_exercise_tag(conn, row["id"], resolved_tag)
+        conn.close()
+        label = f"'{resolved_tag}'" if resolved_tag else "(cleared)"
+        console.print(f"[green]Tag set to {label}[/green] for {len(rows)} exercise(s) matching '{like}'")
+    else:
+        exercises = list_exercises(conn, c.id)
+        for ex in exercises:
+            set_exercise_tag(conn, ex.id, resolved_tag)
+        conn.close()
+        label = f"'{resolved_tag}'" if resolved_tag else "(cleared)"
+        console.print(f"[green]Tag set to {label}[/green] for all {len(exercises)} exercise(s) in '{course}'")
+
+
 @exercise_app.command("import")
 def exercise_import(
     pdf: str = typer.Argument(..., help="Path to the exercise sheet PDF"),
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     sheet: Optional[int] = typer.Option(
         None, "--sheet", "-n",
         help="Sheet number (auto-detected from PDF if omitted)",
@@ -337,6 +428,10 @@ def exercise_import(
     solution_path: Optional[str] = typer.Option(
         None, "--solution-path", "-s",
         help="Path or URL to the solution (applied to all imported exercises)",
+    ),
+    tag: Optional[str] = typer.Option(
+        None, "--tag", help="Source tag to assign to all imported exercises (e.g. 'schwartz')",
+        autocompletion=_complete_tags,
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Preview parsed exercises without inserting them",
@@ -346,6 +441,7 @@ def exercise_import(
 
     The PDF path is stored as the source for every imported exercise.
     Use --solution-path to also record where solutions can be found.
+    Use --tag to label all imported exercises with a source tag.
     """
     from pathlib import Path
     from tunashake.pdf_parser import detect_sheet_number, parse_exercises
@@ -371,9 +467,9 @@ def exercise_import(
     # Preview table.
     console.print(f"\n[bold]PDF:[/bold]   {pdf_path}")
     console.print(f"[bold]Sheet:[/bold] {resolved_sheet}  [bold]Exercises found:[/bold] {len(titles)}\n")
-    table = Table("Title", "Source", "Solution", show_header=True)
+    table = Table("Title", "Tag", "Source", "Solution", show_header=True)
     for t in titles:
-        table.add_row(t, str(pdf_path), solution_path or "-")
+        table.add_row(t, tag or "-", str(pdf_path), solution_path or "-")
     console.print(table)
 
     if dry_run:
@@ -391,7 +487,7 @@ def exercise_import(
     try:
         for t in titles:
             try:
-                create_exercise(conn, c.id, t, solution_path, str(pdf_path))
+                create_exercise(conn, c.id, t, solution_path, str(pdf_path), tag=tag)
                 added += 1
             except Exception as e:
                 if "UNIQUE" in str(e):
@@ -409,8 +505,8 @@ def exercise_import(
 
 
 # CSV columns accepted by import-csv (order doesn't matter, header is required).
-_CSV_COLUMNS = ["title", "solution_path", "source_path", "priority"]
-_CSV_EXAMPLE = "title,solution_path,source_path,priority\n1.1.a,/path/to/solutions.pdf,/path/to/sheet.pdf,0\n1.1.b,,,5\n"
+_CSV_COLUMNS = ["title", "solution_path", "source_path", "priority", "tag"]
+_CSV_EXAMPLE = "title,solution_path,source_path,priority,tag\n1.1.a,/path/to/solutions.pdf,/path/to/sheet.pdf,0,\n1.1.b,,,5,schwartz\n"
 
 
 @exercise_app.command("csv-template")
@@ -422,7 +518,11 @@ def exercise_csv_template():
 @exercise_app.command("import-csv")
 def exercise_import_csv(
     csv_file: str = typer.Argument(..., help="Path to the CSV file"),
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
+    tag: Optional[str] = typer.Option(
+        None, "--tag", help="Default tag for rows that have no 'tag' column value",
+        autocompletion=_complete_tags,
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Preview rows without inserting them",
     ),
@@ -430,7 +530,8 @@ def exercise_import_csv(
     """Bulk import exercises from a CSV file.
 
     Required column: title.
-    Optional columns: solution_path, source_path, priority (default 0).
+    Optional columns: solution_path, source_path, priority (default 0), tag.
+    Use --tag to set a fallback tag for rows without one.
 
     Run 'tunashake exercise csv-template' to see the expected format.
     """
@@ -471,11 +572,13 @@ def exercise_import_csv(
             errors.append(f"Row {i}: priority must be an integer, got '{raw_priority}'.")
             continue
 
+        row_tag = row.get("tag", "").strip() or tag or None
         exercises.append({
             "title": title,
             "solution_path": row.get("solution_path", "").strip() or None,
             "source_path": row.get("source_path", "").strip() or None,
             "priority": priority,
+            "tag": row_tag,
         })
 
     if errors:
@@ -485,10 +588,11 @@ def exercise_import_csv(
 
     # Preview table.
     console.print(f"\n[bold]CSV:[/bold] {csv_path}  [bold]Rows:[/bold] {len(exercises)}\n")
-    table = Table("Title", "Pri", "Source", "Solution", show_header=True)
+    table = Table("Title", "Tag", "Pri", "Source", "Solution", show_header=True)
     for ex in exercises:
         table.add_row(
             ex["title"],
+            ex["tag"] or "-",
             str(ex["priority"]),
             ex["source_path"] or "-",
             ex["solution_path"] or "-",
@@ -512,6 +616,7 @@ def exercise_import_csv(
                 create_exercise(
                     conn, c.id,
                     ex["title"], ex["solution_path"], ex["source_path"], ex["priority"],
+                    ex["tag"],
                 )
                 added += 1
             except Exception as e:
@@ -533,10 +638,14 @@ def exercise_import_csv(
 
 @app.command()
 def repl(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     strategy: str = typer.Option(
         "priority", "--strategy", "-s",
         help=f"Picking strategy: {', '.join(STRATEGIES)}",
+    ),
+    tag: Optional[str] = typer.Option(
+        None, "--tag", help="Restrict session to exercises with this tag (omit for all)",
+        autocompletion=_complete_tags,
     ),
 ):
     """
@@ -557,7 +666,8 @@ def repl(
     conn, c = _require_course(course)
     conn.close()
 
-    console.print(f"\n[bold]Course:[/bold] {course}  [dim](strategy: {strategy})[/dim]")
+    tag_label = f"  [dim](tag: {tag})[/dim]" if tag else ""
+    console.print(f"\n[bold]Course:[/bold] {course}  [dim](strategy: {strategy})[/dim]{tag_label}")
     console.print("[dim]Grade 1–5 · (s)kip · (o)pen · (p)source · src <path> · sol <path> · sel <title> · (q)uit[/dim]\n")
 
     forced: "Exercise | None" = None  # set by 'sel' to override the picker
@@ -565,7 +675,7 @@ def repl(
     while True:
         # Re-fetch each iteration so grades recorded this session affect future picks.
         conn = get_connection()
-        exercises = list_exercises(conn, c.id)
+        exercises = list_exercises(conn, c.id, tag=tag)
         trials_map = get_trials_for_course(conn, c.id)
         conn.close()
 
@@ -692,7 +802,7 @@ def repl(
 
 @trial_app.command("add")
 def trial_add(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
     title: str = typer.Option(..., "--title", "-t", help="Exercise title"),
     grade: int = typer.Option(..., "--grade", "-g", help="Grade 1 (easy) to 5 (hard)"),
     note: Optional[str] = typer.Option(None, "--note", "-n", help="Optional note"),
@@ -722,7 +832,7 @@ def trial_add(
 
 @stats_app.command("show")
 def stats_show(
-    course: str = typer.Option(..., "--course", "-c", help="Course name"),
+    course: _CourseOpt = ...,
 ):
     """Show statistics for a course."""
     conn, c = _require_course(course)
