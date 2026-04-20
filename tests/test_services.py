@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from tunashake.models import Exercise, Trial
-from tunashake.services import STRATEGIES, next_exercise, weighted_grade, weighted_trials, course_stats
+from tunashake.services import STRATEGIES, _exercise_parent, next_exercise, weighted_grade, weighted_trials, course_stats
 
 
 def make_exercise(eid: int, title: str) -> Exercise:
@@ -13,6 +13,18 @@ def make_exercise(eid: int, title: str) -> Exercise:
 def make_trial(tid: int, exercise_id: int, grade: int, ts_offset: int = 0) -> Trial:
     ts = datetime(2024, 1, 1, 0, ts_offset, tzinfo=timezone.utc)
     return Trial(id=tid, exercise_id=exercise_id, grade=grade, timestamp=ts)
+
+
+class TestExerciseParent:
+    def test_three_part_title(self):
+        assert _exercise_parent("1.1.a") == "1.1"
+        assert _exercise_parent("2.3.1") == "2.3"
+
+    def test_two_part_title(self):
+        assert _exercise_parent("1.1") == "1.1"
+
+    def test_four_part_title(self):
+        assert _exercise_parent("1.1.a.i") == "1.1"
 
 
 class TestNextExercise:
@@ -46,15 +58,36 @@ class TestNextExercise:
         result = next_exercise([ex1, ex2], trials)
         assert result is ex2  # grade 4 is worse
 
-    def test_title_tiebreaker(self):
-        ex1 = make_exercise(1, "1.2.a")
-        ex2 = make_exercise(2, "1.1.a")
+    def test_sub_exercise_ordering(self):
+        """1.1.a must always be picked before 1.1.b when they are tied."""
+        ex_a = make_exercise(1, "1.1.a")
+        ex_b = make_exercise(2, "1.1.b")
+        # Run many times to confirm determinism despite internal randomisation.
+        for _ in range(20):
+            result = next_exercise([ex_a, ex_b], {})
+            assert result is ex_a
+
+    def test_untried_picks_deterministically_by_title(self):
+        """With no trials, always pick the smallest title — no randomisation."""
+        ex_11a = make_exercise(1, "1.1.a")
+        ex_12a = make_exercise(2, "1.2.a")
+        for _ in range(20):
+            assert next_exercise([ex_11a, ex_12a], {}) is ex_11a
+
+    def test_randomises_across_exercise_groups_when_tried(self):
+        """Once exercises have trials, randomise at the parent-exercise level."""
+        ex_11a = make_exercise(1, "1.1.a")
+        ex_12a = make_exercise(2, "1.2.a")
         trials = {
             1: [make_trial(1, 1, 3)],
             2: [make_trial(2, 2, 3)],
         }
-        result = next_exercise([ex1, ex2], trials)
-        assert result is ex2  # "1.1.a" < "1.2.a"
+        seen = set()
+        for _ in range(200):
+            r = next_exercise([ex_11a, ex_12a], trials)
+            assert r is not None
+            seen.add(r.id)
+        assert seen == {1, 2}
 
     def test_latest_trial_is_used_not_first(self):
         """If a student improves over time, use the most recent grade."""

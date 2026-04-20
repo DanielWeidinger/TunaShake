@@ -18,19 +18,36 @@ def _latest_grade(trials: list[Trial]) -> int | None:
     return sorted(trials, key=lambda t: t.timestamp)[-1].grade
 
 
+def _exercise_parent(title: str) -> str:
+    """Return the parent key (sheet.exercise), stripping any sub-exercise suffix.
+
+    Titles with 3+ dot-separated parts (e.g. '1.1.a', '2.3.1') have a
+    sub-exercise; the parent is the first two parts ('1.1', '2.3').
+    Titles with 2 parts (e.g. '1.1') have no sub-exercise and are their own parent.
+    """
+    parts = title.split(".")
+    if len(parts) >= 3:
+        return f"{parts[0]}.{parts[1]}"
+    return title
+
+
 def next_exercise(
     exercises: list[Exercise],
     trials_by_exercise: dict[int, list[Trial]],
 ) -> Exercise | None:
     """
-    Deterministic pick — the exercise most in need of practice.
+    Priority pick — randomised at the exercise level, ordered within sub-exercises.
 
     Priority (ascending sort key, smallest = first pick):
     1. Higher exercise.priority first (negated so larger = smaller key).
     2. Untried exercises before tried ones.
     3. Fewest trials.
     4. Worst (highest) latest grade — grade 5 means hardest.
-    5. Title for deterministic tie-breaking.
+
+    Among all tied candidates a random *parent exercise* (sheet.exercise) is
+    chosen uniformly, then the first sub-exercise of that parent in title order
+    is returned.  This ensures 1.1.a is always picked before 1.1.b while still
+    randomising across different exercises.
     """
     if not exercises:
         return None
@@ -40,12 +57,29 @@ def next_exercise(
             trials_by_exercise.get(ex.id, []), key=lambda t: t.timestamp
         )
         if not trials:
-            return (-ex.priority, 0, 0, 0, ex.title)
+            return (-ex.priority, 0, 0, 0)
         latest = trials[-1].grade
         # Negate grade so grade-5 (worst) maps to -5 (smallest → first).
-        return (-ex.priority, 1, len(trials), -latest, ex.title)
+        return (-ex.priority, 1, len(trials), -latest)
 
-    return min(exercises, key=sort_key)
+    best_key = min(sort_key(ex) for ex in exercises)
+    candidates = [ex for ex in exercises if sort_key(ex) == best_key]
+
+    untried = best_key[1] == 0
+    if untried:
+        # No trial data yet — pick deterministically by title so exercises are
+        # always introduced in a consistent order.
+        return min(candidates, key=lambda ex: ex.title)
+
+    # Group candidates by parent exercise, then pick a random parent.
+    groups: dict[str, list[Exercise]] = {}
+    for ex in candidates:
+        parent = _exercise_parent(ex.title)
+        groups.setdefault(parent, []).append(ex)
+
+    chosen_group = random.choice(list(groups.values()))
+    # Within the group always take the first sub-exercise in title order.
+    return min(chosen_group, key=lambda ex: ex.title)
 
 
 def weighted_grade(
