@@ -652,6 +652,9 @@ def repl(
         None, "--tag", help="Restrict session to exercises with this tag (omit for all)",
         autocompletion=_complete_tags,
     ),
+    like: Optional[str] = typer.Option(
+        None, "--like", "-l", help="Restrict session to exercises whose title matches this SQL LIKE pattern (e.g. '3.%%')",
+    ),
 ):
     """
     Interactive study session: get an exercise, grade it, repeat.
@@ -672,7 +675,8 @@ def repl(
     conn.close()
 
     tag_label = f"  [dim](tag: {tag})[/dim]" if tag else ""
-    console.print(f"\n[bold]Course:[/bold] {course}  [dim](strategy: {strategy})[/dim]{tag_label}")
+    like_label = f"  [dim](like: {like})[/dim]" if like else ""
+    console.print(f"\n[bold]Course:[/bold] {course}  [dim](strategy: {strategy})[/dim]{tag_label}{like_label}")
     console.print("[dim]Grade 1–5 · (s)kip · (o)pen · (p)source · src <path> · sol <path> · sel <title> · (q)uit[/dim]\n")
 
     forced: "Exercise | None" = None  # set by 'sel' to override the picker
@@ -680,7 +684,7 @@ def repl(
     while True:
         # Re-fetch each iteration so grades recorded this session affect future picks.
         conn = get_connection()
-        exercises = list_exercises(conn, c.id, tag=tag)
+        exercises = list_exercises(conn, c.id, tag=tag, pattern=like)
         trials_map = get_trials_for_course(conn, c.id)
         conn.close()
 

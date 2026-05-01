@@ -134,3 +134,40 @@ def test_repl_skip_records_skipped_trial():
     result = runner.invoke(app, ["exercise", "show", "--course", "SkipTest", "--title", "1.1.a"])
     assert result.exit_code == 0
     assert "skipped" in result.output
+
+
+def test_repl_like_shows_in_header():
+    runner.invoke(app, ["course", "create", "LikeTest"])
+    runner.invoke(app, ["exercise", "add", "--course", "LikeTest", "--title", "1.1.a"])
+    result = runner.invoke(app, ["repl", "--course", "LikeTest", "--like", "3.%%"], input="q\n")
+    assert result.exit_code == 0
+    assert "(like: 3.%%)" in result.output
+
+
+def test_repl_like_restricts_to_matching_exercises():
+    runner.invoke(app, ["course", "create", "LikeTest2"])
+    runner.invoke(app, ["exercise", "add", "--course", "LikeTest2", "--title", "2.1.a"])
+    runner.invoke(app, ["exercise", "add", "--course", "LikeTest2", "--title", "3.1.a"])
+    runner.invoke(app, ["exercise", "add", "--course", "LikeTest2", "--title", "3.2.b"])
+    runner.invoke(app, ["exercise", "add", "--course", "LikeTest2", "--title", "4.1.a"])
+    result = runner.invoke(app, ["repl", "--course", "LikeTest2", "--like", "3.%%"], input="q\n")
+    assert result.exit_code == 0
+    assert "3.1.a" in result.output or "3.2.b" in result.output
+    assert "2.1.a" not in result.output
+    assert "4.1.a" not in result.output
+
+
+def test_repl_like_and_tag_work_together():
+    runner.invoke(app, ["course", "create", "LikeTagTest"])
+    runner.invoke(app, ["exercise", "add", "--course", "LikeTagTest", "--title", "1.1.a"])
+    runner.invoke(app, ["exercise", "add", "--course", "LikeTagTest", "--title", "2.1.a", "--tag", "hard"])
+    runner.invoke(app, ["exercise", "add", "--course", "LikeTagTest", "--title", "3.1.a", "--tag", "hard"])
+    result = runner.invoke(
+        app, ["repl", "--course", "LikeTagTest", "--like", "3.%%", "--tag", "hard"], input="q\n"
+    )
+    assert result.exit_code == 0
+    assert "(like: 3.%%)" in result.output
+    assert "(tag: hard)" in result.output
+    assert "3.1.a" in result.output
+    assert "1.1.a" not in result.output
+    assert "2.1.a" not in result.output

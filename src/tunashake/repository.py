@@ -87,19 +87,18 @@ def list_exercises(
     conn: sqlite3.Connection,
     course_id: int,
     tag: Optional[str] = None,
+    pattern: Optional[str] = None,
 ) -> list[Exercise]:
+    query = "SELECT id, course_id, title, solution_path, source_path, priority, tag FROM exercises WHERE course_id = ?"
+    params: list = [course_id]
     if tag is not None:
-        rows = conn.execute(
-            "SELECT id, course_id, title, solution_path, source_path, priority, tag FROM exercises "
-            "WHERE course_id = ? AND tag = ? ORDER BY title",
-            (course_id, tag),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id, course_id, title, solution_path, source_path, priority, tag FROM exercises "
-            "WHERE course_id = ? ORDER BY title",
-            (course_id,),
-        ).fetchall()
+        query += " AND tag = ?"
+        params.append(tag)
+    if pattern is not None:
+        query += " AND title LIKE ?"
+        params.append(pattern)
+    query += " ORDER BY title"
+    rows = conn.execute(query, params).fetchall()
     return [_row_to_exercise(r) for r in rows]
 
 
