@@ -122,3 +122,15 @@ def test_exercise_not_found():
     result = runner.invoke(app, ["exercise", "show", "--course", "QFT", "--title", "9.9.z"])
     assert result.exit_code == 1
     assert "not found" in result.output
+
+
+def test_repl_skip_records_skipped_trial():
+    runner.invoke(app, ["course", "create", "SkipTest"])
+    runner.invoke(app, ["exercise", "add", "--course", "SkipTest", "--title", "1.1.a"])
+    result = runner.invoke(app, ["repl", "--course", "SkipTest"], input="s\nq\n")
+    assert result.exit_code == 0
+    assert "Skipped" in result.output
+
+    result = runner.invoke(app, ["exercise", "show", "--course", "SkipTest", "--title", "1.1.a"])
+    assert result.exit_code == 0
+    assert "skipped" in result.output

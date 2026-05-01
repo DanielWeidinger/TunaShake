@@ -148,7 +148,7 @@ def set_exercise_tag(
 def create_trial(
     conn: sqlite3.Connection,
     exercise_id: int,
-    grade: int,
+    grade: int | None,
     note: Optional[str] = None,
 ) -> Trial:
     ts = datetime.now(timezone.utc).isoformat()

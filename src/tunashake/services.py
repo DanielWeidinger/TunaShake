@@ -12,10 +12,11 @@ StrategyFn = Callable[[list[Exercise], dict[int, list[Trial]]], "Exercise | None
 
 
 def _latest_grade(trials: list[Trial]) -> int | None:
-    """Return the grade of the most recent trial, or None if there are none."""
-    if not trials:
+    """Return the grade of the most recent trial with a non-None grade, or None if there are none."""
+    graded = [t for t in trials if t.grade is not None]
+    if not graded:
         return None
-    return sorted(trials, key=lambda t: t.timestamp)[-1].grade
+    return sorted(graded, key=lambda t: t.timestamp)[-1].grade
 
 
 def _exercise_parent(title: str) -> str:
@@ -58,9 +59,10 @@ def next_exercise(
         )
         if not trials:
             return (-ex.priority, 0, 0, 0)
-        latest = trials[-1].grade
-        # Negate grade so grade-5 (worst) maps to -5 (smallest → first).
-        return (-ex.priority, 1, len(trials), -latest)
+        latest = _latest_grade(trials)
+        if latest is None:
+            return (-ex.priority, 1, len(trials), 0)
+        return (-ex.priority, 2, len(trials), -latest)
 
     best_key = min(sort_key(ex) for ex in exercises)
     candidates = [ex for ex in exercises if sort_key(ex) == best_key]
@@ -139,8 +141,9 @@ def course_stats(
     untried = sum(1 for ex in exercises if not trials_by_exercise.get(ex.id))
     all_trials = [t for ts in trials_by_exercise.values() for t in ts]
     total_trials = len(all_trials)
+    graded_trials = [t for t in all_trials if t.grade is not None]
     avg_grade = (
-        sum(t.grade for t in all_trials) / total_trials if all_trials else None
+        sum(t.grade for t in graded_trials if t.grade is not None) / len(graded_trials) if graded_trials else None
     )
 
     per_exercise = []

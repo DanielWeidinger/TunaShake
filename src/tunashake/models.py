@@ -23,6 +23,6 @@ class Exercise:
 class Trial:
     id: int
     exercise_id: int
-    grade: int
+    grade: int | None
     timestamp: datetime
     note: str | None = None

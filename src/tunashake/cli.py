@@ -205,10 +205,14 @@ def exercise_list(
     table = Table("Title", "Tag", "Pri", "Trials", "Latest Grade", "Source", "Solution", show_header=True)
     for ex in exercises:
         trials = trials_map.get(ex.id, [])
-        latest = trials[-1].grade if trials else "-"
+        if trials:
+            latest_grade = trials[-1].grade
+            latest = str(latest_grade) if latest_grade is not None else "-"
+        else:
+            latest = "-"
         src = ex.source_path or "-"
         sol = ex.solution_path or "-"
-        table.add_row(ex.title, ex.tag or "-", str(ex.priority), str(len(trials)), str(latest), src, sol)
+        table.add_row(ex.title, ex.tag or "-", str(ex.priority), str(len(trials)), latest, src, sol)
     console.print(table)
 
 
@@ -249,7 +253,8 @@ def exercise_show(
     table = Table("#", "Grade", "Timestamp", "Note", show_header=True)
     for i, t in enumerate(trials, 1):
         ts = t.timestamp.strftime("%Y-%m-%d %H:%M")
-        table.add_row(str(i), str(t.grade), ts, t.note or "")
+        grade_str = str(t.grade) if t.grade is not None else "-"
+        table.add_row(str(i), grade_str, ts, t.note or "")
     console.print(table)
 
 
@@ -713,6 +718,11 @@ def repl(
                 return
 
             if cmd in ("s", "skip"):
+                conn = get_connection()
+                ex_db = get_exercise(conn, c.id, ex.title)
+                if ex_db:
+                    create_trial(conn, ex_db.id, None, note="skipped")
+                conn.close()
                 console.print("[dim]Skipped.[/dim]\n")
                 break  # next exercise
 

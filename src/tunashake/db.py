@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS exercises (
 CREATE TABLE IF NOT EXISTS trials (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
-    grade       INTEGER NOT NULL CHECK(grade >= 1 AND grade <= 5),
+    grade       INTEGER CHECK(grade IS NULL OR (grade >= 1 AND grade <= 5)),
     timestamp   TEXT    NOT NULL,
     note        TEXT
 );
@@ -59,4 +59,47 @@ def get_connection() -> sqlite3.Connection:
             conn.commit()
         except Exception:
             pass  # Column already exists.
+
+    # Migration: trials.grade must allow NULL (for skipped exercises).
+    # SQLite cannot ALTER TABLE to change a NOT NULL column, so we recreate.
+    _migrate_trials_grade(conn)
+
     return conn
+
+
+def _migrate_trials_grade(conn: sqlite3.Connection) -> None:
+    """Recreate trials table to allow NULL grade (for skipped entries).
+
+    Older schemas have ``grade INTEGER NOT NULL CHECK(grade >= 1 AND grade <= 5)``.
+    We need to change it to allow NULL so skipped entries can be stored.
+    Since SQLite does not support ALTER COLUMN, we recreate the table.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='trials'"
+    ).fetchone()
+    if not row or not row["sql"]:
+        return
+
+    sql = row["sql"]
+    grade_part = sql.split("grade")[1].split(",")[0]
+    if "NOT NULL" not in grade_part:
+        return
+
+    conn.execute(
+        """
+        CREATE TABLE __trials_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+            grade       INTEGER CHECK(grade IS NULL OR (grade >= 1 AND grade <= 5)),
+            timestamp   TEXT    NOT NULL,
+            note        TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO __trials_new (id, exercise_id, grade, timestamp, note) "
+        "SELECT id, exercise_id, grade, timestamp, note FROM trials"
+    )
+    with conn:
+        conn.execute("DROP TABLE trials")
+        conn.execute("ALTER TABLE __trials_new RENAME TO trials")
