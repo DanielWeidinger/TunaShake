@@ -662,8 +662,8 @@ def repl(
     Commands at the prompt:
       1-5        record a trial with that grade and move to next exercise
       s / skip   skip this exercise (no trial recorded)
-      o / open   open the solution with xdg-open (then still grade/skip)
-      p / source open the exercise source with xdg-open (then still grade/skip)
+      o / open     open the exercise source with xdg-open (then still grade/skip)
+      p / solution open the solution with xdg-open (then still grade/skip)
       q / quit   exit the session
     """
     if strategy not in STRATEGIES:
@@ -677,7 +677,7 @@ def repl(
     tag_label = f"  [dim](tag: {tag})[/dim]" if tag else ""
     like_label = f"  [dim](like: {like})[/dim]" if like else ""
     console.print(f"\n[bold]Course:[/bold] {course}  [dim](strategy: {strategy})[/dim]{tag_label}{like_label}")
-    console.print("[dim]Grade 1–5 · (s)kip · (o)pen · (p)source · src <path> · sol <path> · sel <title> · (q)uit[/dim]\n")
+    console.print("[dim]Grade 1–5 · (s)kip · (o)pen exercise · (p)solution · src <path> · sol <path> · sel <title> · (q)uit[/dim]\n")
 
     forced: "Exercise | None" = None  # set by 'sel' to override the picker
 
@@ -699,8 +699,10 @@ def repl(
             break
 
         trials = trials_map.get(ex.id, [])
+        graded = [t for t in trials if t.grade is not None]
+        last_grade = graded[-1].grade if graded else None
         trial_info = (
-            f"[dim]({len(trials)} trial(s), last grade: {trials[-1].grade})[/dim]"
+            f"[dim]({len(trials)} trial(s), last non-skipped grade: {last_grade})[/dim]"
             if trials else "[dim](never attempted)[/dim]"
         )
         console.print(f"[bold yellow]{ex.title}[/bold yellow]  {trial_info}")
@@ -731,17 +733,17 @@ def repl(
                 break  # next exercise
 
             if cmd in ("o", "open"):
-                if ex.solution_path:
-                    _xdg_open(ex.solution_path)
-                else:
-                    console.print("[yellow]No solution path set for this exercise.[/yellow]")
-                continue
-
-            if cmd in ("p", "source"):
                 if ex.source_path:
                     _xdg_open(ex.source_path)
                 else:
                     console.print("[yellow]No source path set for this exercise.[/yellow]")
+                continue
+
+            if cmd in ("p", "solution"):
+                if ex.solution_path:
+                    _xdg_open(ex.solution_path)
+                else:
+                    console.print("[yellow]No solution path set for this exercise.[/yellow]")
                 continue
 
             if cmd.startswith("src "):
