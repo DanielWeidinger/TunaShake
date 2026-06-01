@@ -3,7 +3,7 @@ tunashake CLI — built with Typer.
 
 Command hierarchy:
   tunashake course  create / list
-  tunashake exercise add / list / show / next / open-solution / open-source / import
+  tunashake exercise add / list / show / next / open-solution / open-source / set-solution / import
   tunashake trial   add
   tunashake stats   show
   tunashake repl    interactive study session
@@ -420,6 +420,59 @@ def exercise_set_tag(
         conn.close()
         label = f"'{resolved_tag}'" if resolved_tag else "(cleared)"
         console.print(f"[green]Tag set to {label}[/green] for all {len(exercises)} exercise(s) in '{course}'")
+
+
+@exercise_app.command("set-solution")
+def exercise_set_solution(
+    course: _CourseOpt = ...,
+    solution_path: str = typer.Argument(..., help="Path or URL to the solution"),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="Single exercise title"),
+    like: Optional[str] = typer.Option(None, "--like", "-l", help="Title pattern (SQL LIKE, e.g. '1.5.%%')"),
+    sheet: Optional[int] = typer.Option(None, "--sheet", "-n", help="Sheet number (matches all titles starting with '<sheet>.')"),
+):
+    """Set the solution path on one or more exercises.
+
+    Exactly one of --title, --like, or --sheet must be provided.
+    """
+    conn, c = _require_course(course)
+
+    if sum(x is not None for x in (title, like, sheet)) != 1:
+        conn.close()
+        _abort("Provide exactly one of --title, --like, or --sheet.")
+
+    if title:
+        ex = get_exercise(conn, c.id, title)
+        if not ex:
+            conn.close()
+            _abort(f"Exercise '{title}' not found in course '{course}'.")
+        set_exercise_solution(conn, ex.id, solution_path)
+        conn.close()
+        console.print(f"[green]Solution set[/green] for {title}")
+    elif like:
+        rows = conn.execute(
+            "SELECT id, title FROM exercises WHERE course_id = ? AND title LIKE ?",
+            (c.id, like),
+        ).fetchall()
+        if not rows:
+            conn.close()
+            _abort(f"No exercises matching '{like}' in course '{course}'.")
+        for row in rows:
+            set_exercise_solution(conn, row["id"], solution_path)
+        conn.close()
+        console.print(f"[green]Solution set[/green] for {len(rows)} exercise(s) matching '{like}'")
+    else:
+        pattern = f"{sheet}.%"
+        rows = conn.execute(
+            "SELECT id, title FROM exercises WHERE course_id = ? AND title LIKE ?",
+            (c.id, pattern),
+        ).fetchall()
+        if not rows:
+            conn.close()
+            _abort(f"No exercises found for sheet {sheet} in course '{course}'.")
+        for row in rows:
+            set_exercise_solution(conn, row["id"], solution_path)
+        conn.close()
+        console.print(f"[green]Solution set[/green] for {len(rows)} exercise(s) on sheet {sheet}")
 
 
 @exercise_app.command("import")
