@@ -4,6 +4,7 @@ the example PDFs.
 """
 
 from tunashake.pdf_parser import (
+    _parse_aqm_style,
     _parse_generic_style,
     _parse_qft_style,
     _parse_sh_style,
@@ -133,6 +134,50 @@ class TestParseShStyle:
         assert _parse_sh_style([], 1) == []
 
 
+# ── unit tests: _parse_aqm_style ──────────────────────────────────────────────
+
+class TestParseAqmStyle:
+    def test_basic_dotted_headers_with_bare_subs(self):
+        lines = [
+            "Problem 1.1: Title",
+            "a) First sub",
+            "b) Second sub",
+            "Problem 1.2: Another",
+            "a) Only sub",
+        ]
+        assert _parse_aqm_style(lines, 1) == ["1.1.a", "1.1.b", "1.2.a"]
+
+    def test_header_without_subs(self):
+        lines = ["Problem 1.3: No subs", "Some prose text"]
+        assert _parse_aqm_style(lines, 1) == ["1.3"]
+
+    def test_returns_empty_without_dotted_header(self):
+        lines = ["Problem 1 Title", "a) Sub", "b) Sub"]
+        assert _parse_aqm_style(lines, 1) == []
+
+    def test_pattern_locked_per_block(self):
+        lines = [
+            "Problem 1.1: Title",
+            "1. Ordinal sub",
+            "2. Second ordinal",
+            "(a) Nested — should be ignored",
+        ]
+        assert _parse_aqm_style(lines, 1) == ["1.1.1", "1.1.2"]
+
+    def test_case_insensitive_header(self):
+        lines = ["PROBLEM 2.1 Title", "a) Sub"]
+        assert _parse_aqm_style(lines, 2) == ["2.1.a"]
+
+    def test_exercise_keyword(self):
+        lines = ["Exercise 1.1 - Title", "a) Sub", "b) Sub"]
+        assert _parse_aqm_style(lines, 1) == ["1.1.a", "1.1.b"]
+
+    def test_sheet_param_governs_prefix(self):
+        # N in Problem N.M is discarded; sheet param sets the prefix
+        lines = ["Problem 2.3: Title", "a) Sub"]
+        assert _parse_aqm_style(lines, 2) == ["2.3.a"]
+
+
 # ── integration tests: sheet number detection ─────────────────────────────────
 
 class TestDetectSheetNumber:
@@ -153,6 +198,9 @@ class TestDetectSheetNumber:
 
     def test_qft_sheet_6(self):
         assert detect_sheet_number(f"{EXAMPLES}/QFT_Exercise-Sheet_6.pdf") == 6
+
+    def test_aqm_sheet_1(self):
+        assert detect_sheet_number(f"{EXAMPLES}/sheet1_AQM.pdf") == 1
 
 
 # ── integration tests: exercise parsing ───────────────────────────────────────
@@ -212,6 +260,14 @@ class TestParseExercises:
         # Exercise 4: 5 numbered sub-exercises
         assert "6.4.1" in result
         assert "6.4.5" in result
+
+    def test_aqm_sheet_1(self):
+        result = parse_exercises(f"{EXAMPLES}/sheet1_AQM.pdf", 1)
+        assert result == [
+            "1.1.a", "1.1.b",
+            "1.2.a", "1.2.b", "1.2.c",
+            "1.3.a", "1.3.b",
+        ]
 
     def test_deduplication(self):
         for f, s in [

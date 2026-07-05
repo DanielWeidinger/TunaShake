@@ -1,12 +1,21 @@
 """
 Parse exercise titles from PDF exercise sheets.
 
-Supports three layouts (tried in order):
+Supports four layouts (tried in order):
 
   QFT-style  (Sheets 3, 4, …)
     Exercise 1 - Title
     1.1 Sub-exercise text
     1.2 …
+
+  AQM-style  (sheet1_AQM, …)
+    Problem N.M: Title   OR   Exercise N.M - Title
+    Sub-exercises in any of:
+      "1. Text"   ordinal numbers
+      "[a] Text"  bracket letters
+      "(a) Text"  paren letters
+      "a) Text"   bare letter-paren
+    N is the sheet label embedded in the problem number; M is the exercise number.
 
   Generic-style  (Sheets 2, 6, sheet1, …)
     Exercise N - Title   OR   Problem N - Title
@@ -43,6 +52,9 @@ _SHEET_PATTERNS = [
 
 # QFT-style: inline "N.M" sub-exercise numbers (no header context needed)
 _SUB_NUMERIC = re.compile(r'^(\d+)\.(\d+)\s')
+
+# AQM-style: "Problem N.M" or "Exercise N.M" headers — captures exercise number M only
+_AQM_HEADER = re.compile(r'^(?:Exercise|Problem)\s+\d+\.(\d+)\b', re.IGNORECASE)
 
 # Generic-style: "Exercise N" or "Problem N" section headers
 _GENERIC_HEADER = re.compile(r'^(?:Exercise|Problem)\s+(\d+)\b', re.IGNORECASE)
@@ -88,6 +100,8 @@ def parse_exercises(pdf_path: str, sheet: int) -> list[str]:
 
     titles = _parse_qft_style(lines, sheet)
     if not titles:
+        titles = _parse_aqm_style(lines, sheet)
+    if not titles:
         titles = _parse_generic_style(lines, sheet)
     if not titles:
         titles = _parse_sh_style(lines, sheet)
@@ -117,6 +131,59 @@ def _parse_qft_style(lines: list[str], sheet: int) -> list[str]:
             sub = int(m.group(2))
             titles.append(f"{sheet}.{ex}.{sub}")
     return titles
+
+
+def _parse_aqm_style(lines: list[str], sheet: int) -> list[str]:
+    """Collect sub-exercises under 'Problem N.M' / 'Exercise N.M' headers.
+
+    The leading N is the sheet label embedded in the problem number; M is used
+    as the exercise number.  Sub-exercise detection reuses _GENERIC_SUBS with
+    the same locked-pattern logic as _parse_generic_style.
+
+    Returns an empty list if no N.M-style header is found, so this parser
+    silently passes through on sheets that use plain 'Problem N' headers.
+    """
+    titles: list[str] = []
+    current: int | None = None
+    subs: list[str] = []
+    locked_pat: int | None = None
+    found_any_header = False
+
+    def _emit() -> None:
+        if current is None:
+            return
+        if subs:
+            for s in subs:
+                titles.append(f"{sheet}.{current}.{s}")
+        else:
+            titles.append(f"{sheet}.{current}")
+
+    for line in lines:
+        line = line.strip()
+
+        m = _AQM_HEADER.match(line)
+        if m:
+            _emit()
+            current = int(m.group(1))
+            subs = []
+            locked_pat = None
+            found_any_header = True
+            continue
+
+        if current is not None:
+            for i, pat in enumerate(_GENERIC_SUBS):
+                m = pat.match(line)
+                if m:
+                    if locked_pat is None:
+                        locked_pat = i
+                    if i == locked_pat:
+                        sub = str(m.group(1))
+                        if sub not in subs:
+                            subs.append(sub)
+                    break
+
+    _emit()
+    return titles if found_any_header else []
 
 
 def _parse_generic_style(lines: list[str], sheet: int) -> list[str]:

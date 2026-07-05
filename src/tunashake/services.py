@@ -19,6 +19,12 @@ def _latest_grade(trials: list[Trial]) -> int | None:
     return sorted(graded, key=lambda t: t.timestamp)[-1].grade
 
 
+def _worst_grade(trials: list[Trial]) -> int | None:
+    """Return the highest (worst) grade ever recorded, or None if untried."""
+    graded = [t.grade for t in trials if t.grade is not None]
+    return max(graded) if graded else None
+
+
 def _exercise_parent(title: str) -> str:
     """Return the parent key (sheet.exercise), stripping any sub-exercise suffix.
 
@@ -105,6 +111,28 @@ def weighted_grade(
     return random.choices(exercises, weights=weights, k=1)[0]
 
 
+def worst_grade(
+    exercises: list[Exercise],
+    trials_by_exercise: dict[int, list[Trial]],
+) -> Exercise | None:
+    """
+    Pick uniformly at random from exercises that share the single worst
+    (highest) grade ever recorded across all exercises.
+
+    If exercise A has worst grade 5 and exercise B has worst grade 3, only
+    exercises with grade 5 are candidates — B is not in the draw at all.
+    Untried exercises are only included when no exercise has been graded yet.
+    """
+    if not exercises:
+        return None
+    grade_map = {ex.id: _worst_grade(trials_by_exercise.get(ex.id, [])) for ex in exercises}
+    max_grade = max((g for g in grade_map.values() if g is not None), default=None)
+    if max_grade is None:
+        return random.choice(exercises)
+    candidates = [ex for ex in exercises if grade_map[ex.id] == max_grade]
+    return random.choice(candidates)
+
+
 def weighted_trials(
     exercises: list[Exercise],
     trials_by_exercise: dict[int, list[Trial]],
@@ -128,6 +156,7 @@ def weighted_trials(
 STRATEGIES: dict[str, StrategyFn] = {
     "priority":       next_exercise,
     "weighted-grade": weighted_grade,
+    "worst-grade":    worst_grade,
     "weighted-trials": weighted_trials,
 }
 
