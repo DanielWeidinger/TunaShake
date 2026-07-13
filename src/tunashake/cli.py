@@ -220,10 +220,11 @@ def exercise_list(
 def exercise_show(
     course: _CourseOpt = ...,
     title: str = typer.Option(..., "--title", "-t", help="Exercise title"),
+    tag: Optional[str] = typer.Option(None, "--tag", help="Tag to disambiguate when multiple exercises share the same title", autocompletion=_complete_tags),
 ):
     """Inspect an exercise and its trial history."""
     conn, c = _require_course(course)
-    ex = get_exercise(conn, c.id, title)
+    ex = get_exercise(conn, c.id, title, tag=tag)
     if not ex:
         conn.close()
         _abort(f"Exercise '{title}' not found in course '{course}'.")
@@ -306,10 +307,11 @@ def exercise_next(
 def exercise_open_solution(
     course: _CourseOpt = ...,
     title: str = typer.Option(..., "--title", "-t", help="Exercise title"),
+    tag: Optional[str] = typer.Option(None, "--tag", help="Tag to disambiguate when multiple exercises share the same title", autocompletion=_complete_tags),
 ):
     """Open the solution for an exercise using xdg-open."""
     conn, c = _require_course(course)
-    ex = get_exercise(conn, c.id, title)
+    ex = get_exercise(conn, c.id, title, tag=tag)
     conn.close()
 
     if not ex:
@@ -324,10 +326,11 @@ def exercise_open_solution(
 def exercise_open_source(
     course: _CourseOpt = ...,
     title: str = typer.Option(..., "--title", "-t", help="Exercise title"),
+    tag: Optional[str] = typer.Option(None, "--tag", help="Tag to disambiguate when multiple exercises share the same title", autocompletion=_complete_tags),
 ):
     """Open the source for an exercise using xdg-open."""
     conn, c = _require_course(course)
-    ex = get_exercise(conn, c.id, title)
+    ex = get_exercise(conn, c.id, title, tag=tag)
     conn.close()
 
     if not ex:
@@ -778,7 +781,7 @@ def repl(
 
             if cmd in ("s", "skip"):
                 conn = get_connection()
-                ex_db = get_exercise(conn, c.id, ex.title)
+                ex_db = get_exercise(conn, c.id, ex.title, tag=ex.tag)
                 if ex_db:
                     create_trial(conn, ex_db.id, None, note="skipped")
                 conn.close()
@@ -805,7 +808,7 @@ def repl(
                     console.print("[red]Usage: src <path>[/red]")
                     continue
                 conn = get_connection()
-                ex_db = get_exercise(conn, c.id, ex.title)
+                ex_db = get_exercise(conn, c.id, ex.title, tag=ex.tag)
                 if ex_db:
                     set_exercise_source(conn, ex_db.id, path)
                     ex = ex_db
@@ -820,7 +823,7 @@ def repl(
                     console.print("[red]Usage: sol <path>[/red]")
                     continue
                 conn = get_connection()
-                ex_db = get_exercise(conn, c.id, ex.title)
+                ex_db = get_exercise(conn, c.id, ex.title, tag=ex.tag)
                 if ex_db:
                     set_exercise_solution(conn, ex_db.id, path)
                     ex = ex_db
@@ -835,7 +838,7 @@ def repl(
                     console.print("[red]Usage: sel <title>[/red]")
                     continue
                 conn = get_connection()
-                selected = get_exercise(conn, c.id, title)
+                selected = get_exercise(conn, c.id, title, tag=tag)
                 conn.close()
                 if not selected:
                     # Try a case-insensitive partial match.
@@ -859,7 +862,7 @@ def repl(
                 continue
 
             conn = get_connection()
-            ex_db = get_exercise(conn, c.id, ex.title)
+            ex_db = get_exercise(conn, c.id, ex.title, tag=ex.tag)
             if ex_db:
                 create_trial(conn, ex_db.id, grade)
             conn.close()
@@ -922,7 +925,7 @@ def stats_show(
 
     if stats["per_exercise"]:
         console.print("\n[bold]Per exercise (hardest first):[/bold]")
-        table = Table("Title", "Trials", "Latest Grade", show_header=True)
+        table = Table("Title", "Trials", "Last Non-skipped Grade", show_header=True)
         for row in stats["per_exercise"]:
             lg = str(row["latest_grade"]) if row["latest_grade"] is not None else "-"
             table.add_row(row["title"], str(row["trial_count"]), lg)

@@ -73,13 +73,17 @@ def create_exercise(
 
 
 def get_exercise(
-    conn: sqlite3.Connection, course_id: int, title: str
+    conn: sqlite3.Connection, course_id: int, title: str, tag: Optional[str] = None
 ) -> Optional[Exercise]:
-    row = conn.execute(
+    query = (
         "SELECT id, course_id, title, solution_path, source_path, priority, tag FROM exercises "
-        "WHERE course_id = ? AND title = ?",
-        (course_id, title),
-    ).fetchone()
+        "WHERE course_id = ? AND title = ?"
+    )
+    params: list = [course_id, title]
+    if tag is not None:
+        query += " AND tag = ?"
+        params.append(tag)
+    row = conn.execute(query, params).fetchone()
     return _row_to_exercise(row) if row else None
 
 

@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS exercises (
     source_path   TEXT,
     priority      INTEGER NOT NULL DEFAULT 0,
     tag           TEXT,
-    UNIQUE(course_id, title)
+    UNIQUE(course_id, title, tag)
 );
 
 CREATE TABLE IF NOT EXISTS trials (
@@ -63,8 +63,49 @@ def get_connection() -> sqlite3.Connection:
     # Migration: trials.grade must allow NULL (for skipped exercises).
     # SQLite cannot ALTER TABLE to change a NOT NULL column, so we recreate.
     _migrate_trials_grade(conn)
+    # Migration: exercises unique constraint must include tag so same-titled
+    # exercises from different tags can coexist in one course.
+    _migrate_exercises_unique(conn)
 
     return conn
+
+
+def _migrate_exercises_unique(conn: sqlite3.Connection) -> None:
+    """Widen the exercises UNIQUE constraint from (course_id, title) to
+    (course_id, title, tag) so the same exercise number can appear in one
+    course under different tags.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='exercises'"
+    ).fetchone()
+    if not row or not row["sql"]:
+        return
+    if "title, tag" in row["sql"]:
+        return  # already migrated
+
+    conn.execute(
+        """
+        CREATE TABLE __exercises_new (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            course_id     INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+            title         TEXT    NOT NULL,
+            solution_path TEXT,
+            source_path   TEXT,
+            priority      INTEGER NOT NULL DEFAULT 0,
+            tag           TEXT,
+            UNIQUE(course_id, title, tag)
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO __exercises_new "
+        "(id, course_id, title, solution_path, source_path, priority, tag) "
+        "SELECT id, course_id, title, solution_path, source_path, priority, tag "
+        "FROM exercises"
+    )
+    with conn:
+        conn.execute("DROP TABLE exercises")
+        conn.execute("ALTER TABLE __exercises_new RENAME TO exercises")
 
 
 def _migrate_trials_grade(conn: sqlite3.Connection) -> None:

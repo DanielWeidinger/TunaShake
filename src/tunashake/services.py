@@ -180,12 +180,12 @@ def course_stats(
         trials = sorted(
             trials_by_exercise.get(ex.id, []), key=lambda t: t.timestamp
         )
-        latest = trials[-1] if trials else None
+        graded = [t for t in trials if t.grade is not None]
         per_exercise.append(
             {
                 "title": ex.title,
                 "trial_count": len(trials),
-                "latest_grade": latest.grade if latest else None,
+                "latest_grade": graded[-1].grade if graded else None,
             }
         )
 
